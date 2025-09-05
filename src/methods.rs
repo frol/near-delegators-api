@@ -9,7 +9,7 @@ use borsh::BorshDeserialize;
 use futures::{stream::StreamExt, TryStreamExt};
 use std::collections::BTreeSet;
 
-pub const ATTEMPTS: u8 = 20;
+pub const ATTEMPTS: u32 = 200000;
 pub const LIMIT: usize = 500;
 
 pub async fn get_receiver_id(
@@ -72,29 +72,35 @@ pub async fn get_block_id(
     ))
 }
 
-pub async fn get_all_validators(beta_json_rpc_client: &JsonRpcClient) -> Result<BTreeSet<String>> {
+pub async fn get_all_validators(
+    beta_json_rpc_client: &JsonRpcClient,
+    block_id: u64,
+) -> Result<BTreeSet<String>> {
     info!("Fetching all validators");
 
-    let query_view_method_response = beta_json_rpc_client
-        .call(near_jsonrpc_client::methods::query::RpcQueryRequest {
-            block_reference: near_primitives::types::Finality::Final.into(),
-            request: near_primitives::views::QueryRequest::ViewState {
-                account_id: "poolv1.near".parse()?,
-                prefix: near_primitives::types::StoreKey::from(Vec::new()),
-                include_proof: false,
-            },
-        })
-        .await
-        .context("Failed to fetch query ViewState for <poolv1.near> on network <beta-rpc>")?;
-    if let near_jsonrpc_primitives::types::query::QueryResponseKind::ViewState(result) =
-        query_view_method_response.kind
-    {
-        info!("Parsing validators");
+    let mut validators = BTreeSet::new();
 
-        Ok(result
-            .values
-            .iter()
-            .filter_map(|item| {
+    for account_id in ["pool.near", "poolv1.near"] {
+        let query_view_method_response = beta_json_rpc_client
+            .call(&near_jsonrpc_client::methods::any::<
+                Result<serde_json::Value, near_jsonrpc_client::methods::query::RpcQueryError>,
+            >(
+                "view_state_paginated",
+                serde_json::json!({
+                    "block_id": block_id,
+                    "account_id": account_id,
+                }),
+            ))
+            .await
+            .context("Failed to fetch query ViewState for <poolv1.near> on network <beta-rpc>")?;
+        let query_view_method_response: near_jsonrpc_client::methods::query::RpcQueryResponse =
+            serde_json::from_value(query_view_method_response["Ok"].clone()).unwrap();
+        if let near_jsonrpc_primitives::types::query::QueryResponseKind::ViewState(result) =
+            query_view_method_response.kind
+        {
+            info!("Parsing validators");
+
+            validators.extend(result.values.iter().filter_map(|item| {
                 if &item.key[..2] == b"se" {
                     String::try_from_slice(&item.value)
                         .ok()
@@ -102,13 +108,15 @@ pub async fn get_all_validators(beta_json_rpc_client: &JsonRpcClient) -> Result<
                 } else {
                     None
                 }
-            })
-            .collect())
-    } else {
-        error!("Failed to parse validators");
+            }));
+        } else {
+            error!("Failed to parse validators");
 
-        Err(color_eyre::Report::msg("Error call result".to_string()))
+            return Err(color_eyre::Report::msg("Error call result".to_string()));
+        }
     }
+
+    Ok(validators)
 }
 
 async fn get_number_of_delegators(
@@ -151,12 +159,14 @@ pub async fn get_delegators_by_validator_account_id(
     validator_account_id: String,
     block_reference: near_primitives::types::BlockReference,
 ) -> Result<BTreeSet<String>> {
-    let number_of_delegators = get_number_of_delegators(
-        beta_json_rpc_client,
-        block_reference.clone(),
-        validator_account_id.clone(),
-    )
-    .await?;
+    let number_of_delegators = dbg!(
+        get_number_of_delegators(
+            beta_json_rpc_client,
+            block_reference.clone(),
+            validator_account_id.clone(),
+        )
+        .await
+    )?;
 
     let delegators = futures::stream::iter((0..number_of_delegators).step_by(LIMIT)).map(|from| {
         let block_reference = block_reference.clone();
@@ -202,7 +212,7 @@ pub async fn get_delegators_by_validator_account_id(
             }
         }
     })
-        .buffer_unordered(50)
+        .buffer_unordered(1)
         .try_collect::<BTreeSet<_>>()
         .await?;
 

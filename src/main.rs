@@ -16,6 +16,7 @@ use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use futures::stream::StreamExt;
 use std::sync::Arc;
 use tokio::sync::{mpsc::Sender, RwLock};
 
@@ -91,7 +92,7 @@ async fn update(data: Json<WebhookData>, state: &State<AppState>) -> Status {
         return Status::InternalServerError;
     };
 
-    let beta_json_rpc_client = JsonRpcClient::connect("https://beta.rpc.mainnet.near.org");
+    let beta_json_rpc_client = JsonRpcClient::connect("https://free.rpc.fastnear.com");
 
     let block_reference = near_primitives::types::BlockReference::BlockId(
         near_primitives::types::BlockId::Hash(block_hash),
@@ -158,7 +159,7 @@ async fn main() -> Result<()> {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
 
     tokio::spawn(async move {
-        let beta_json_rpc_client = JsonRpcClient::connect("https://beta.rpc.mainnet.near.org");
+        let beta_json_rpc_client = JsonRpcClient::connect("https://read.rpc.mainnet.fastnear.com");
 
         loop {
             interval.tick().await;
@@ -177,7 +178,7 @@ async fn main() -> Result<()> {
                 };
 
                 let Ok(validators_to_update) =
-                    methods::get_all_validators(&beta_json_rpc_client).await
+                    dbg!(methods::get_all_validators(&beta_json_rpc_client, block_id).await)
                 else {
                     error!("Failed to get all validators");
                     continue;
@@ -207,7 +208,7 @@ async fn main() -> Result<()> {
 
     let app_state_clone = app_state.clone();
     tokio::spawn(async move {
-        let json_rpc_client = JsonRpcClient::connect("https://rpc.mainnet.near.org");
+        let json_rpc_client = JsonRpcClient::connect("https://free.rpc.fastnear.com");
 
         while rx.recv().await.is_some() {
             let mut validators_to_process = BTreeMap::new();
@@ -216,27 +217,27 @@ async fn main() -> Result<()> {
                 &mut validators_to_process,
             );
 
-            let mut handles = Vec::new();
-
-            for (account_id, block_id) in validators_to_process {
-                let app_state_clone = app_state_clone.clone();
-                let beta_json_rpc_client = json_rpc_client.clone();
-                handles.push(tokio::spawn(async move {
-                    if let Err(e) = delegators::update_delegators_by_validator_account_id(
-                        &beta_json_rpc_client,
-                        &app_state_clone.delegators_state,
-                        &app_state_clone.validators_state,
-                        account_id.clone(),
-                        block_id,
-                    )
-                    .await
-                    {
-                        error!("Error updating delegators: {}", e);
+            futures::stream::iter(validators_to_process)
+                .map(|(account_id, block_id)| {
+                    let app_state_clone = app_state_clone.clone();
+                    let beta_json_rpc_client = json_rpc_client.clone();
+                    async move {
+                        if let Err(e) = delegators::update_delegators_by_validator_account_id(
+                            &beta_json_rpc_client,
+                            &app_state_clone.delegators_state,
+                            &app_state_clone.validators_state,
+                            account_id.clone(),
+                            block_id,
+                        )
+                        .await
+                        {
+                            error!("Error updating delegators: {}", e);
+                        }
                     }
-                }));
-            }
-
-            futures::future::join_all(handles).await;
+                })
+                .buffer_unordered(10)
+                .collect::<Vec<_>>()
+                .await;
 
             if let Err(e) =
                 delegators::update_delegators_cache(&app_state_clone.delegators_state).await

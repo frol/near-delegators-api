@@ -72,7 +72,7 @@ pub struct DelegatorWithTimestamp {
 }
 
 pub async fn with_json_file_cache() -> Result<tokio::fs::File> {
-    let path = format!("/mnt/{DELEGATORS_FILENAME}");
+    let path = format!("./{DELEGATORS_FILENAME}");
 
     tokio::fs::OpenOptions::new()
         .read(true)
@@ -91,13 +91,10 @@ pub async fn get_delegators_from_cache() -> Result<DelegatorsWithTimestamp> {
         .await
         .context("Failed to read from file")?;
 
-    Ok(serde_json::from_str(&content).map_or_else(
-        |_| {
-            info!("File is empty");
-            DelegatorsWithTimestamp::default()
-        },
-        |data| data,
-    ))
+    Ok(serde_json::from_str(&content).unwrap_or_else(|_| {
+        info!("File is empty");
+        DelegatorsWithTimestamp::default()
+    }))
 }
 
 pub async fn update_delegators_cache(
@@ -172,7 +169,7 @@ pub async fn update_delegators_by_validator_account_id(
             "Failed to get delegators for validator_account_id: {}. Retrying...",
             validator_account_id
         );
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     }
 
     color_eyre::eyre::bail!(
