@@ -8,9 +8,11 @@ extern crate rocket;
 use std::io::Write;
 
 use near_jsonrpc_client::JsonRpcClient;
+use rocket::http::Method;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::State;
+use rocket_cors::{AllowedOrigins, CorsOptions};
 
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -247,8 +249,19 @@ async fn main() -> Result<()> {
         }
     });
 
+    let cors = CorsOptions::default()
+        .allowed_origins(AllowedOrigins::all())
+        .allowed_methods(
+            vec![Method::Get, Method::Post, Method::Patch]
+                .into_iter()
+                .map(From::from)
+                .collect(),
+        )
+        .allow_credentials(true);
+
     let _ = rocket::build()
         .mount("/", routes![get_all, get_by_account_id, update])
+        .attach(cors.to_cors().unwrap())
         .manage(app_state)
         .launch()
         .await;
