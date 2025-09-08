@@ -69,7 +69,6 @@ impl From<&ValidatorsWithTimestamp> for DelegatorsWithTimestamp {
 pub struct DelegatorWithTimestamp {
     pub timestamp: i64,
     //pub delegator_staking_pools: BTreeSet<String>,
-
     pub account_id: String,
     pub pools: Vec<Pool>,
 }

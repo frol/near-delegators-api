@@ -1,6 +1,6 @@
 use crate::extensions::{self, CallResultExt, RpcQueryResponseExt};
 
-use color_eyre::{eyre::Context, Result, eyre};
+use color_eyre::{eyre, eyre::Context, Result};
 
 use near_jsonrpc_client::JsonRpcClient;
 

@@ -63,20 +63,23 @@ async fn get_by_account_id(
 
     let locked_delegators_state = state.delegators_state.read().await;
 
-    let Some(delegator_staking_pools) = locked_delegators_state
+    let empty_staking_pools = std::collections::BTreeSet::new();
+    let delegator_staking_pools = locked_delegators_state
         .delegator_staking_pools
         .get(account_id)
-        else {
-            return Err(Status::new(503));
-        };
+        .unwrap_or(&empty_staking_pools);
     Ok((
         Status::Ok,
         Json(delegators::DelegatorWithTimestamp {
             timestamp: locked_delegators_state.timestamp,
             //delegator_staking_pools: delegator_staking_pools.clone(),
-
             account_id: account_id.to_string(),
-            pools: delegator_staking_pools.iter().map(|pool_id| delegators::Pool { pool_id: pool_id.to_string() }).collect(),
+            pools: delegator_staking_pools
+                .iter()
+                .map(|pool_id| delegators::Pool {
+                    pool_id: pool_id.to_string(),
+                })
+                .collect(),
         }),
     ))
 }
