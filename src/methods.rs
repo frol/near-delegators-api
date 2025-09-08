@@ -1,6 +1,6 @@
 use crate::extensions::{self, CallResultExt, RpcQueryResponseExt};
 
-use color_eyre::{eyre::Context, Result};
+use color_eyre::{eyre::Context, Result, eyre};
 
 use near_jsonrpc_client::JsonRpcClient;
 
@@ -173,46 +173,51 @@ pub async fn get_delegators_by_validator_account_id(
         let validator_account_id = validator_account_id.clone();
 
         async move {
-            let delegators_response = beta_json_rpc_client
-                .call(near_jsonrpc_client::methods::query::RpcQueryRequest {
-                    block_reference: block_reference.clone(),
-                    request: near_primitives::views::QueryRequest::CallFunction {
-                        account_id: validator_account_id.parse()?,
-                        method_name: "get_accounts".to_string(),
-                        args: near_primitives::types::FunctionArgs::from(serde_json::to_vec(
-                            &serde_json::json!({
-                                "from_index": from,
-                                "limit": LIMIT,
-                            }),
-                        )?),
-                    },
-                })
-                .await;
-
-            match delegators_response {
-                Ok(response) => response
-                    .call_result()?
-                    .parse_result_from_json::<BTreeSet<extensions::Delegator>>()
-                    .map(|delegators| {
-                        delegators
-                            .into_iter()
-                            .map(|delegator| delegator.account_id.to_string())
-                            .collect::<BTreeSet<_>>()
-                    })
-                    .context("Failed to parse delegators"),
-                Err(near_jsonrpc_client::errors::JsonRpcError::ServerError(
-                    near_jsonrpc_client::errors::JsonRpcServerError::HandlerError(
-                        near_jsonrpc_client::methods::query::RpcQueryError::NoContractCode { .. }
-                        | near_jsonrpc_client::methods::query::RpcQueryError::ContractExecutionError {
-                            ..
+            let mut error = Err(eyre::eyre!("unreachable"));
+            for _ in 0..ATTEMPTS {
+                let delegators_response = beta_json_rpc_client
+                    .call(near_jsonrpc_client::methods::query::RpcQueryRequest {
+                        block_reference: block_reference.clone(),
+                        request: near_primitives::views::QueryRequest::CallFunction {
+                            account_id: validator_account_id.parse()?,
+                            method_name: "get_accounts".to_string(),
+                            args: near_primitives::types::FunctionArgs::from(serde_json::to_vec(
+                                &serde_json::json!({
+                                    "from_index": from,
+                                    "limit": LIMIT,
+                                }),
+                            )?),
                         },
-                    ),
-                )) => Ok(BTreeSet::new()),
-                Err(err) => Err(err.into()),
+                    })
+                    .await;
+
+                match delegators_response {
+                    Ok(response) => return response
+                        .call_result()?
+                        .parse_result_from_json::<BTreeSet<extensions::Delegator>>()
+                        .map(|delegators| {
+                            delegators
+                                .into_iter()
+                                .map(|delegator| delegator.account_id.to_string())
+                                .collect::<BTreeSet<_>>()
+                        })
+                        .context("Failed to parse delegators"),
+                    Err(near_jsonrpc_client::errors::JsonRpcError::ServerError(
+                        near_jsonrpc_client::errors::JsonRpcServerError::HandlerError(
+                            near_jsonrpc_client::methods::query::RpcQueryError::NoContractCode { .. }
+                            | near_jsonrpc_client::methods::query::RpcQueryError::ContractExecutionError {
+                                ..
+                            },
+                        ),
+                    )) => return Ok(BTreeSet::new()),
+                    Err(err) => error = Err(err.into()),
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
+            error
         }
     })
-        .buffer_unordered(1)
+        .buffer_unordered(3)
         .try_collect::<BTreeSet<_>>()
         .await?;
 

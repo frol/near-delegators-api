@@ -68,7 +68,16 @@ impl From<&ValidatorsWithTimestamp> for DelegatorsWithTimestamp {
 #[serde(crate = "rocket::serde")]
 pub struct DelegatorWithTimestamp {
     pub timestamp: i64,
-    pub delegator_staking_pools: BTreeSet<String>,
+    //pub delegator_staking_pools: BTreeSet<String>,
+
+    pub account_id: String,
+    pub pools: Vec<Pool>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Default, Clone)]
+#[serde(crate = "rocket::serde")]
+pub struct Pool {
+    pub pool_id: String,
 }
 
 pub async fn with_json_file_cache() -> Result<tokio::fs::File> {

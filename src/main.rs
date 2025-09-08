@@ -54,7 +54,7 @@ async fn get_all(state: &State<AppState>) -> Json<delegators::DelegatorsWithTime
     Json(state.delegators_state.read().await.clone())
 }
 
-#[get("/get-staking-pools/<account_id>")]
+#[get("/v1/account/<account_id>/staking")]
 async fn get_by_account_id(
     account_id: &str,
     state: &State<AppState>,
@@ -63,21 +63,22 @@ async fn get_by_account_id(
 
     let locked_delegators_state = state.delegators_state.read().await;
 
-    locked_delegators_state
+    let Some(delegator_staking_pools) = locked_delegators_state
         .delegator_staking_pools
         .get(account_id)
-        .map_or_else(
-            || Err(Status::new(503)),
-            |delegators| {
-                Ok((
-                    Status::Ok,
-                    Json(delegators::DelegatorWithTimestamp {
-                        timestamp: locked_delegators_state.timestamp,
-                        delegator_staking_pools: delegators.clone(),
-                    }),
-                ))
-            },
-        )
+        else {
+            return Err(Status::new(503));
+        };
+    Ok((
+        Status::Ok,
+        Json(delegators::DelegatorWithTimestamp {
+            timestamp: locked_delegators_state.timestamp,
+            //delegator_staking_pools: delegator_staking_pools.clone(),
+
+            account_id: account_id.to_string(),
+            pools: delegator_staking_pools.iter().map(|pool_id| delegators::Pool { pool_id: pool_id.to_string() }).collect(),
+        }),
+    ))
 }
 
 #[post("/update-staking-pools", data = "<data>")]
@@ -237,7 +238,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 })
-                .buffer_unordered(10)
+                .buffer_unordered(1)
                 .collect::<Vec<_>>()
                 .await;
 
